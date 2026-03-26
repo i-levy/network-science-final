@@ -3,10 +3,14 @@ import pandas as pd
 from tqdm import tqdm
 import os
 import networkx as nx
+import seaborn as sns
+import matplotlib.pyplot as plt
 from scipy import sparse
 from sklearn.preprocessing import MinMaxScaler
 from bct.algorithms.reference import latmio_und, randmio_und
 from itertools import combinations
+from scipy.sparse.csgraph import shortest_path
+
 
 def clustering_coefficient(adj):
     """
@@ -14,64 +18,64 @@ def clustering_coefficient(adj):
 
     Inputs
     ---
-    adj    Weighted, undirected graph adjacency matrix.
+    adj  :  numpy.ndarray
+            Weighted, undirected graph adjacency matrix.
 
     Returns
     ---
-    C      Global clustering coefficient for inputted network.
+    C  :  float
+          Global clustering coefficient for inputted network.
     
     """
+    # Ensure floats
+    adj = adj.astype(float)
 
-    # Initialize empty list to store all clustering coefficients
-    coeffs = []
-    # Get max weight
-    w_max = np.max(adj)
-
-    # Loop through all nodes
-    for i in range(adj.shape[0]):
-        # Calculate normalizing constant
-        k_i = np.count_nonzero(adj[i])
-        # If i is only connected to one other node, avoid divide by zero error and set the normalizing constant to 0
-        if k_i == 1:
-            norm = 0
-        elif k_i == 0:
-            norm = 0
-        else:
-            norm = 1/(k_i * (k_i - 1))
-
-        # Get list of indices that are not i
-        idx_all = np.array(list(range(adj.shape[0])))
-        idx = idx_all[idx_all != i]
-        # Get all pairwise combinations of indices
-        combos = list(combinations(idx, 2))
-
-        # Initialize inner sum
-        inner_sum = 0
-        # Loop through all cominations
-        for j, k in combos:
-            # Get weights for ij, ik, and jk
-            w_ij = adj[i, j]
-            w_jk = adj[j, k]
-            w_ik = adj[i, k]
+    # Ensure symmetric matrix
+    adj = (adj + adj.T) / 2
     
-            # Calculate normalized weights
-            w_hat_ij = w_ij / w_max
-            w_hat_jk = w_jk / w_max
-            w_hat_ik = w_ik / w_max
+    # Get max weight, excluding diagonal
+    w_max = np.max(adj[~np.eye(adj.shape[0], dtype=bool)])
+    if w_max == 0:
+        return 0.0
 
-            # Calculate product of normalized edge weights
-            product = (w_hat_ij * w_hat_jk * w_hat_ik)**(1/3)
+    # Normalize weights
+    w_hat = adj / w_max
+    # Initialize empty array to store all clustering coefficients
+    N = adj.shape[0]
+    local_coeffs = np.zeros(N)
 
-            # Add 
-            inner_sum += product
+    # Loop through each node
+    for i in range(N):
+        # Find neighbors (nodes with positive weight)
+        neighbors = np.where(adj[i] > 0)[0]
+        k_i = len(neighbors)
 
-        # Calculate local clustering coefficient
-        coeff = norm * inner_sum
-        # Append local clustering coefficient
-        coeffs.append(coeff)
+        if k_i < 2:
+            local_coeffs[i] = 0
+            continue
+
+        # Calculate normalizing constant
+        norm = 2.0 / (k_i * (k_i - 1))
+
+        # Sum over all neighbors
+        inner_sum = 0
+        for idx_j in range(k_i):
+            for idx_k in range(idx_j + 1, k_i):
+                j = neighbors[idx_j]
+                k = neighbors[idx_k]
+
+                # Get normalized weights
+                w_ij = w_hat[i, j]
+                w_ik = w_hat[i, k]
+                w_jk = w_hat[j, k]
+
+                # Calculate inner product
+                product = (w_ij * w_ik * w_jk) ** (1/3)
+                inner_sum += product
+        local_coeffs[i] = norm * inner_sum
         
     # Average all local coefficients
-    C = np.mean(coeffs)
+    C = np.mean(local_coeffs)
 
     # Return average clustering coefficient
     return C
@@ -79,6 +83,7 @@ def clustering_coefficient(adj):
 def characteristic_path_length(adj):
     """
     Calculates the characteristic path length, L. Since this is for weighted networks, the distance between two nodes is defined as the inverse of the weight of the edge connecting the nodes, hence, d_ij = 1/w_ij.
+    This uses scipy.sparse.csgraph.shortest_path to find the shortest paths.
 
     Inputs
     ---
@@ -89,35 +94,95 @@ def characteristic_path_length(adj):
     L      Characteristic path length for inputted network.
     
     """
-    
+    adj = adj.astype(float)
     # Number of nodes
     N = adj.shape[0]
+    # Create distance matrix using 1/w_ij
+    distance_matrix = np.zeros_like(adj)
+    for i in range(N):
+        for j in range(N):
+            if i == j:
+                distance_matrix[i, j] = 0
+            elif adj[i, j] > 0:
+                distance_matrix[i, j] = 1 / adj[i, j]
+            else:
+                distance_matrix[i, j] = np.inf
+    # Calculate shortest path
+    distance_matrix = shortest_path(distance_matrix, method='auto', directed=False)
+
+    total_sum = 0
+    valid_pairs = 0
+
+    for i in range(N):
+        for j in range(N):
+            if i != j and not np.isinf(distance_matrix[i, j]):
+                total_sum += distance_matrix[i, j]
+                valid_pairs += 1
+    
     # Calculate normalizing constant
     norm = 1 / (N * (N - 1))
-    # Initialize sum
-    running_sum = 0
-
-    # Get all pairs of nodes
-    pairs = list(combinations(list(range(adj.shape[0])), 2))
-    # Loop through all nodes
-    for i, j in pairs:
-        # Get edge weight
-        w_ij = adj[i, j]
-        # Get distance, avoid divide by 0
-        if w_ij == 0:
-            d_ij = 0
-        else:
-            d_ij = 1 / w_ij
-
-        # Add distance to running sum
-        running_sum += d_ij
-
-    # Normalize running sum by total number of edges
-    L = norm * running_sum
-    print(f'Num pairs: {len(pairs)}')
-    print(f'N: {N}')
-    print(f'norm: {norm}')
-    print(f'sum: {running_sum}')
-        
-    # Return characteristic path length
+    # Calculate characteristic path length
+    L = total_sum * norm
+    
     return L
+
+def SWP(adj):
+    """
+    Calculates the Small-World Propensity of a weighted network. Calculates characteristic path length, L, and clustering coefficient, C, of inputted network. Generates latticized and randomized versions of the inputted network and calculates L and C for the generated networks.
+
+    Inputs
+    ---
+    adj    Weighted, undirected graph adjacency matrix.
+
+    Returns
+    ---
+    SWP      Small-World Propensity, SWP in [0, 1]
+    """
+
+    # Calculate path length and clustering of observed network
+    L_obs = characteristic_path_length(adj)
+    print(f'L_obs: {L_obs}')
+    C_obs = clustering_coefficient(adj)
+    print(f'C_obs: {C_obs}')
+
+    # Randomize network
+    rand, _ = randmio_und(R=adj, itr=10)
+    # Path length of randomized network
+    L_rand = characteristic_path_length(rand)
+    print(f'L_rand: {L_rand}')
+    # Clustering of randomized network
+    C_rand = clustering_coefficient(rand)
+    print(f'C_rand: {C_rand}')
+    
+    # Latticize network
+    latt, _, _, _ = latmio_und(R=adj, itr=10)
+    # Path length of latticized network
+    L_latt = characteristic_path_length(latt)
+    print(f'L_latt: {L_latt}')
+    # Clustering of latticized network
+    C_latt = clustering_coefficient(latt)
+    print(f'C_latt: {C_latt}')
+
+    # Calculate delta_C, comparing observed clustering to randomized and latticized versions
+    delta_C = (C_latt - C_obs) / (C_latt - C_rand)
+    # Keep delta_C between [0, 1]
+    if delta_C > 1:
+        delta_C = 1
+    elif delta_C < 0:
+        delta_C = 0
+    # Calculate delta_L, comparing observed path length to randomized and latticized versions
+    delta_L = (L_obs - L_rand) / (L_latt - L_rand)
+    # Keep delta_L between [0, 1]
+    if delta_L > 1:
+        delta_L = 1
+    elif delta_L < 0:
+        delta_L = 0
+
+    SWP = 1 - np.sqrt(((delta_C ** 2) + (delta_L ** 2)) / 2)
+    # Keep SWP between [0, 1]
+    if SWP > 1:
+        SWP = 1
+    elif SWP < 0:
+        SWP = 0
+
+    return SWP, delta_C, delta_L
