@@ -11,90 +11,78 @@ from scipy.spatial.distance import cdist
 
 def make_lattice_null(adj):
     """
-    Latticizes an inputted network. This is taken from Results: Generating Weighted 
-    Small-World Networks, and Figure 3. In the Supplementals, they say that they use 
-    Euclidean distance, but that requires some knowledge of where the nodes are in space. 
-    I have some idea of how to get the Euclidean distances by using 
-    nilearn.plotting.find_parcellation_cut_coords, but that requires having a .nii file, and,
-    most importantly, they don't describe using Euclidean distance in the main text.
-
-    This instead creates a circulant graph using the radius of the observed network. It maintains
-    the number of edges and the edge weight distribution, distributing higher weights to edges
-    with shorter distances around the ring.
+    Generates a regular matrix with weights from the original network. 
+    The radius r is automatically calculated from the network density.
     
-    Makes lattice null graph with the same number of edges and weight distribution as the input graph. 
-    The highest weights are distributed to the nodes with shortest distance.
-
-    Inputs
-    ---
-    adj  :  Weighted, undirected adjacency matrix.
-           
-
-    Returns
-    ---
-    lattice_null : Lattice null graph adjacency matrix. 
-
+    Parameters:
+    -----------
+    adj : Weighted, undirected adjacency matrix.
+        
+    Returns:
+    --------
+    lattice_null : Lattice null graph adjacency matrix.
     
     """
-
-    adj = adj.astype(float)
+    # Ensure symmetry
     adj = (adj + adj.T) / 2
-    # Use only largest connected component (maybe not correct, but ideally all graphs will be connected)
-    G = nx.Graph(adj)
-    if not nx.is_connected(G):
-        largest_cc = max(nx.connected_components(G), key=len)
-        G0 = G.subgraph(largest_cc)
-        adj = nx.adjacency_matrix(G0).toarray()
-    N = adj.shape[0]
-
-    # Calculate the observed radius
-    upper = np.triu(adj, k=1)
-    E = np.count_nonzero(upper)
-    r = int(np.round(E/N))
+    n = len(adj)
     
-    # Extract upper triangle edges and their weights
-    rows, cols = np.triu_indices(N, k=1)
-    weights = adj[rows, cols]
+    # Calculate r from network density
+    # Count edges in upper triangle (excluding diagonal)
+    upper_tri = np.triu(adj, k=1)
+    E = np.count_nonzero(upper_tri)
+    r = int(np.ceil(E / n))
+    
+    # Get all weights from upper triangle (including zeros)
+    full_upper = np.triu(adj)
+    all_weights = full_upper.flatten()
+    
     # Sort in descending order
-    weights_sorted = np.sort(weights)[::-1]
+    sorted_weights = np.sort(all_weights)[::-1]
     
-    node_order = np.arange(N)
-    # Create circular lattice using radius,r, and N
-    lattice_graph = nx.circulant_graph(n=N, offsets=range(1, r+1))
-    # Get edges and compute distances
-    lattice_edges = list(lattice_graph.edges())
-    # Calculate circular distances for assigning weights
-    lattice_distances = []
-    for i, j in lattice_edges:
-        # Minimum distance around the ring
-        dist = min(abs(i - j), N - abs(i - j))
-        lattice_distances.append(dist)
-
-    # Sort distances; shorter distances get higher weights
-    sorted_indices = np.argsort(lattice_distances)
-    sorted_edges = [lattice_edges[idx] for idx in sorted_indices]
-
-    # Assign weights
-    lattice_null = np.zeros((N, N))
-    num_lattice_edges = len(sorted_edges)
-    num_obs_edges = len(weights)
-
-    # Check and handle edge count mismatches
-    if num_lattice_edges != num_obs_edges:
-        # Trim or pad
-        num_assign = min(num_lattice_edges, num_obs_edges)
-        assigned_weights = weights_sorted[:num_assign]
+    # Calculate number of columns needed
+    num_els = int(np.ceil(n / 2))
+    
+    # Pad or trim to reach required size: n * num_els
+    required_size = n * num_els
+    if len(sorted_weights) < required_size:
+        sorted_weights = np.pad(sorted_weights, (0, required_size - len(sorted_weights)), 
+                               constant_values=0)
     else:
-        num_assign = num_lattice_edges
-        assigned_weights = weights_sorted
-
-    for idx, (i, j) in enumerate(sorted_edges[:num_assign]):
-        lattice_null[i, j] = assigned_weights[idx]
-        lattice_null[j, i] = assigned_weights[idx]
-
-    inverse_order = np.argsort(node_order)
-    lattice_null = lattice_null[inverse_order][:, inverse_order]
-
+        sorted_weights = sorted_weights[:required_size]
+    
+    # Reshape to matrix (n rows, num_els cols) using column-major order (MATLAB style)
+    weight_matrix = sorted_weights.reshape(n, num_els, order='F')
+    
+    # Initialize output matrix
+    lattice_null = np.zeros((n, n))
+    
+    # Assign weights to create regular network
+    # For each node (origin)
+    for node in range(n):
+        # For each distance ring from 1 to r
+        for dist in range(1, r + 1):            
+            # Convert to 0-indexing
+            col_idx = dist - 1  
+            
+            # Find available (non-zero) weights in this column
+            available = np.where(weight_matrix[:, col_idx] != 0)[0]
+            
+            if len(available) > 0:
+                # Randomly select a weight from available ones
+                chosen_row = np.random.choice(available)
+                weight = weight_matrix[chosen_row, col_idx]
+                
+                # Calculate target node at distance 'dist' around the ring
+                target = (node + dist) % n
+                
+                # Assign symmetrically
+                lattice_null[node, target] = weight
+                lattice_null[target, node] = weight
+                
+                # Mark this weight as used (remove from pool)
+                weight_matrix[chosen_row, col_idx] = 0
+    
     return lattice_null
 
 
@@ -117,12 +105,6 @@ def make_random_null(adj):
     """
     adj = adj.astype(float)
     adj = (adj + adj.T) / 2
-    # Use only largest connected component (maybe not correct, but ideally all graphs will be connected)
-    G = nx.Graph(adj)
-    if not nx.is_connected(G):
-        largest_cc = max(nx.connected_components(G), key=len)
-        G0 = G.subgraph(largest_cc)
-        adj = nx.adjacency_matrix(G0).toarray()
     N = adj.shape[0]
 
     # Extract upper triangle edges and their weights
@@ -130,8 +112,7 @@ def make_random_null(adj):
     weights = adj[rows, cols]  
 
     # Shuffle the weights randomly
-    shuffled_weights = weights.copy()
-    np.random.shuffle(shuffled_weights)
+    shuffled_weights = np.random.permutation(weights)
 
     # Reconstruct symmetric matrix
     random_null = np.zeros((N, N))
