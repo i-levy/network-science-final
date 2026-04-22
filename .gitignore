@@ -213,3 +213,4 @@ run_swp.sh
 mats/
 logs/
 file_list.txt
+*.lock
