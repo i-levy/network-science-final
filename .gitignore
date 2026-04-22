@@ -209,3 +209,6 @@ __marimo__/
 
 # My shell script
 run_swp.sh
+# My data and log folders
+mats/
+logs/
