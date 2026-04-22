@@ -24,10 +24,10 @@ Could also look into using global efficiency, but this not the same thing.
 * Maximum/minimum spanning tree (makes it too sparse) but it stays fully connected
 
 ## Plan
-* Figure out how to run MATLAB code to test it
+* Figure out how to run MATLAB code to test it -- DONE
     * Save all matrices to `.mat` using `scipy.io.savemat` and make text file with paths
     * Write script to run `small_world_propensity.mat`
-    * Write batch script to pass in matrix, run matlab file, save result to text file
+    * Write batch script to pass in matrix, run matlab file, save result to file
         * Make sure to include subject ID in output somehow for debugging
 * Iterate over various proportional thresholds for just covariance FC
     * Show how clustering changes
