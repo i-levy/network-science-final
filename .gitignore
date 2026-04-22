@@ -212,3 +212,4 @@ run_swp.sh
 # My data and log folders
 mats/
 logs/
+file_list.txt
