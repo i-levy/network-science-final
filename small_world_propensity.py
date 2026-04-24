@@ -141,12 +141,6 @@ def characteristic_path_length(adj):
     adj = adj.astype(float)
     # Ensure symmetric
     adj = (adj + adj.T) / 2
-    G = nx.Graph(adj)
-    # Use only largest connected component (maybe not correct, but ideally all graphs will be connected)
-    if not nx.is_connected(G):
-        largest_cc = max(nx.connected_components(G), key=len)
-        G0 = G.subgraph(largest_cc)
-        adj = nx.adjacency_matrix(G0).toarray()
     # Number of nodes
     N = adj.shape[0]
     # Create distance matrix by replacing edge weights with d_ij = 1/w_ij
@@ -154,8 +148,11 @@ def characteristic_path_length(adj):
         dist = np.where(adj > 0, 1.0 / adj, np.inf)
     np.fill_diagonal(dist, 0.0)
     dist = shortest_path(dist, method='auto', directed=False)
-    
-    L = dist.sum() / (N * (N - 1))
+    dist = np.where(np.isinf(dist), 0, dist)
+
+    # Muldoon et al. just do the mean of all elements, including the diagonal
+    #L = dist.sum() / (N * (N - 1))
+    L = np.mean(dist)
 
     return L
 
@@ -178,12 +175,6 @@ def clustering_coefficient_bct(adj):
     """
     adj = adj.astype(float)
     adj = (adj + adj.T) / 2
-    G = nx.Graph(adj)
-    # Use only largest connected component (maybe not correct, but ideally all graphs will be connected)
-    if not nx.is_connected(G):
-        largest_cc = max(nx.connected_components(G), key=len)
-        G0 = G.subgraph(largest_cc)
-        adj = nx.adjacency_matrix(G0).toarray()
     # BCT doesn't normalize by w_max, but it's a faster implementation, so manually calculate w_max
     w_max = adj[~np.eye(adj.shape[0], dtype=bool)].max()
     if w_max == 0:
@@ -216,13 +207,7 @@ def SWP(adj, coords=None, itr=100):
     adj = adj.astype(float)
     # Ensure symmetric matrix
     adj = (adj + adj.T) / 2
-    # Use only largest connected component (maybe not correct, but ideally all graphs will be connected)
-    G = nx.Graph(adj)
-    if not nx.is_connected(G):
-        print('Graph is not fully connected.')
-        largest_cc = max(nx.connected_components(G), key=len)
-        G0 = G.subgraph(largest_cc)
-        adj = nx.adjacency_matrix(G0).toarray()
+    
     # Calculate path length and clustering of observed network
     L_obs = characteristic_path_length(adj)
     #print(f'L_obs: {L_obs}')
