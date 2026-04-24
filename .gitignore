@@ -209,6 +209,7 @@ __marimo__/
 
 # My shell script
 run_swp.sh
+run_threshold.sh
 # My data and log folders
 mats/
 logs/
